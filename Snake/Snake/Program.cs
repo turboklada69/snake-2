@@ -1,2 +1,15 @@
-﻿using var game = new Snake.Game1();
-game.Run();
+﻿using SnakeMono;
+using System;
+
+namespace Snake
+{
+    public static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            using (var game = new Game1())
+                game.Run();
+        }
+    }
+}
