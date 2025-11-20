@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
 
-namespace SnakeMono
+namespace Snake
 {
     public class Game1 : Game
     {
@@ -15,8 +15,8 @@ namespace SnakeMono
         private SpriteFont font;
 
         private int gridSize = 20;
-        private int columns = 30;
-        private int rows = 20;
+        private int columns;
+        private int rows;
 
         private List<Point> snake = new List<Point>();
         private Point direction = new Point(1, 0);
@@ -26,23 +26,35 @@ namespace SnakeMono
         private double moveInterval = 0.12f;
 
         private int score = 0;
-
         private Random rand = new Random();
+
+        // Particle efekty
+        private List<Particle> particles = new List<Particle>();
+
+        // Překážky
+        private List<Point> obstacles = new List<Point>();
+        private int obstacleCount = 40; // víc překážek pro fullscreen
 
         public Game1()
         {
             graphics = new GraphicsDeviceManager(this);
             Content.RootDirectory = "Content";
 
-            graphics.PreferredBackBufferWidth = 600;
-            graphics.PreferredBackBufferHeight = 400;
+            // Nastavení fullscreen
+            graphics.IsFullScreen = true;
+            graphics.ApplyChanges();
         }
 
         protected override void Initialize()
         {
+            // Spočítáme počet sloupců a řádků podle fullscreen rozlišení
+            columns = GraphicsDevice.DisplayMode.Width / gridSize;
+            rows = GraphicsDevice.DisplayMode.Height / gridSize;
+
             snake.Clear();
             snake.Add(new Point(columns / 2, rows / 2));
 
+            GenerateObstacles();
             SpawnApple();
 
             base.Initialize();
@@ -72,6 +84,8 @@ namespace SnakeMono
                 MoveSnake();
             }
 
+            UpdateParticles(gameTime);
+
             base.Update(gameTime);
         }
 
@@ -94,7 +108,6 @@ namespace SnakeMono
             Point head = snake[0];
             Point newHead = new Point(head.X + direction.X, head.Y + direction.Y);
 
-            // Kolize s hranou
             if (newHead.X < 0 || newHead.X >= columns ||
                 newHead.Y < 0 || newHead.Y >= rows)
             {
@@ -102,7 +115,12 @@ namespace SnakeMono
                 return;
             }
 
-            // Kolize se sebou
+            if (obstacles.Contains(newHead))
+            {
+                ResetGame();
+                return;
+            }
+
             if (snake.Contains(newHead))
             {
                 ResetGame();
@@ -111,10 +129,10 @@ namespace SnakeMono
 
             snake.Insert(0, newHead);
 
-            // Jablko
             if (newHead == apple)
             {
                 score++;
+                CreateParticles(apple);
                 SpawnApple();
             }
             else
@@ -129,19 +147,61 @@ namespace SnakeMono
             do
             {
                 p = new Point(rand.Next(columns), rand.Next(rows));
-            }
-            while (snake.Contains(p));
+            } while (snake.Contains(p) || obstacles.Contains(p));
 
             apple = p;
+        }
+
+        private void GenerateObstacles()
+        {
+            obstacles.Clear();
+            for (int i = 0; i < obstacleCount; i++)
+            {
+                Point p;
+                do
+                {
+                    p = new Point(rand.Next(columns), rand.Next(rows));
+                } while (snake.Contains(p) || p == new Point(columns / 2, rows / 2));
+
+                obstacles.Add(p);
+            }
         }
 
         private void ResetGame()
         {
             snake.Clear();
             snake.Add(new Point(columns / 2, rows / 2));
-            direction = new Point(1, 0);
             score = 0;
+            particles.Clear();
+            GenerateObstacles();
             SpawnApple();
+        }
+
+        private void CreateParticles(Point pos)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                particles.Add(new Particle(
+                    new Vector2(pos.X * gridSize + gridSize / 2, pos.Y * gridSize + gridSize / 2),
+                    new Vector2((float)(rand.NextDouble() - 0.5) * 80, (float)(rand.NextDouble() - 0.5) * 80),
+                    0.5f
+                ));
+            }
+        }
+
+        private void UpdateParticles(GameTime time)
+        {
+            float dt = (float)time.ElapsedGameTime.TotalSeconds;
+
+            for (int i = particles.Count - 1; i >= 0; i--)
+            {
+                var p = particles[i];
+                p.Life -= dt;
+                p.Position += p.Velocity * dt;
+
+                if (p.Life <= 0)
+                    particles.RemoveAt(i);
+            }
         }
 
         protected override void Draw(GameTime gameTime)
@@ -150,22 +210,59 @@ namespace SnakeMono
 
             spriteBatch.Begin();
 
+            // Skin hada podle skóre
+            Color snakeColor = Color.LimeGreen;
+
+            if (score >= 10 && score < 20) snakeColor = Color.CornflowerBlue;
+            else if (score >= 20 && score < 30) snakeColor = Color.MediumPurple;
+            else if (score >= 30) snakeColor = new Color(rand.Next(255), rand.Next(255), rand.Next(255));
+
+            // Překážky
+            foreach (Point o in obstacles)
+            {
+                spriteBatch.Draw(rectTex,
+                    new Rectangle(o.X * gridSize, o.Y * gridSize, gridSize, gridSize),
+                    Color.Gray);
+            }
+
+            // Had
             foreach (Point s in snake)
             {
                 spriteBatch.Draw(rectTex,
                     new Rectangle(s.X * gridSize, s.Y * gridSize, gridSize, gridSize),
-                    Color.LimeGreen);
+                    snakeColor);
             }
 
+            // Jablko
             spriteBatch.Draw(rectTex,
                 new Rectangle(apple.X * gridSize, apple.Y * gridSize, gridSize, gridSize),
                 Color.Red);
+
+            // Particles
+            foreach (var p in particles)
+            {
+                spriteBatch.Draw(rectTex, new Rectangle((int)p.Position.X, (int)p.Position.Y, 4, 4), Color.Yellow);
+            }
 
             spriteBatch.DrawString(font, $"Skore: {score}", new Vector2(10, 10), Color.White);
 
             spriteBatch.End();
 
             base.Draw(gameTime);
+        }
+
+        private class Particle
+        {
+            public Vector2 Position;
+            public Vector2 Velocity;
+            public float Life;
+
+            public Particle(Vector2 pos, Vector2 vel, float life)
+            {
+                Position = pos;
+                Velocity = vel;
+                Life = life;
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using SnakeMono;
+﻿using Snake;
 using System;
 
 namespace Snake
@@ -10,6 +10,7 @@ namespace Snake
         {
             using (var game = new Game1())
                 game.Run();
+
         }
     }
 }
