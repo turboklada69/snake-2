@@ -14,9 +14,9 @@ namespace Snake
         private Texture2D rectTex;
         private SpriteFont font;
 
-        private int gridSize = 20;
-        private int columns;
-        private int rows;
+        private int gridSize = 20; // velikost jednoho čtverce
+        private int columns = 30;  // počet sloupců
+        private int rows = 20;     // počet řádků
 
         private List<Point> snake = new List<Point>();
         private Point direction = new Point(1, 0);
@@ -28,33 +28,33 @@ namespace Snake
         private int score = 0;
         private Random rand = new Random();
 
-        // Particle efekty
         private List<Particle> particles = new List<Particle>();
-
-        // Překážky
         private List<Point> obstacles = new List<Point>();
-        private int obstacleCount = 40; // víc překážek pro fullscreen
 
         public Game1()
         {
             graphics = new GraphicsDeviceManager(this);
             Content.RootDirectory = "Content";
 
-            // Nastavení fullscreen
-            graphics.IsFullScreen = true;
+            // Nastavení okna
+            graphics.PreferredBackBufferWidth = columns * gridSize;
+            graphics.PreferredBackBufferHeight = rows * gridSize;
+            graphics.IsFullScreen = false;
             graphics.ApplyChanges();
         }
 
         protected override void Initialize()
         {
-            // Spočítáme počet sloupců a řádků podle fullscreen rozlišení
-            columns = GraphicsDevice.DisplayMode.Width / gridSize;
-            rows = GraphicsDevice.DisplayMode.Height / gridSize;
-
+            // Had uprostřed
             snake.Clear();
             snake.Add(new Point(columns / 2, rows / 2));
 
-            GenerateObstacles();
+            // Okrajové zdi
+            GenerateWalls();
+
+            // Náhodné překážky uvnitř mapy
+            GenerateObstacles(20);
+
             SpawnApple();
 
             base.Initialize();
@@ -108,20 +108,7 @@ namespace Snake
             Point head = snake[0];
             Point newHead = new Point(head.X + direction.X, head.Y + direction.Y);
 
-            if (newHead.X < 0 || newHead.X >= columns ||
-                newHead.Y < 0 || newHead.Y >= rows)
-            {
-                ResetGame();
-                return;
-            }
-
-            if (obstacles.Contains(newHead))
-            {
-                ResetGame();
-                return;
-            }
-
-            if (snake.Contains(newHead))
+            if (obstacles.Contains(newHead) || snake.Contains(newHead))
             {
                 ResetGame();
                 return;
@@ -146,22 +133,40 @@ namespace Snake
             Point p;
             do
             {
-                p = new Point(rand.Next(columns), rand.Next(rows));
+                p = new Point(rand.Next(1, columns - 1), rand.Next(1, rows - 1));
             } while (snake.Contains(p) || obstacles.Contains(p));
 
             apple = p;
         }
 
-        private void GenerateObstacles()
+        private void GenerateWalls()
         {
             obstacles.Clear();
-            for (int i = 0; i < obstacleCount; i++)
+
+            // Horní a spodní hrany
+            for (int x = 0; x < columns; x++)
+            {
+                obstacles.Add(new Point(x, 0));
+                obstacles.Add(new Point(x, rows - 1));
+            }
+
+            // Levá a pravá hrana
+            for (int y = 1; y < rows - 1; y++)
+            {
+                obstacles.Add(new Point(0, y));
+                obstacles.Add(new Point(columns - 1, y));
+            }
+        }
+
+        private void GenerateObstacles(int count)
+        {
+            for (int i = 0; i < count; i++)
             {
                 Point p;
                 do
                 {
-                    p = new Point(rand.Next(columns), rand.Next(rows));
-                } while (snake.Contains(p) || p == new Point(columns / 2, rows / 2));
+                    p = new Point(rand.Next(1, columns - 1), rand.Next(1, rows - 1));
+                } while (snake.Contains(p) || obstacles.Contains(p));
 
                 obstacles.Add(p);
             }
@@ -173,7 +178,10 @@ namespace Snake
             snake.Add(new Point(columns / 2, rows / 2));
             score = 0;
             particles.Clear();
-            GenerateObstacles();
+
+            obstacles.Clear();
+            GenerateWalls();
+            GenerateObstacles(20);
             SpawnApple();
         }
 
@@ -212,7 +220,6 @@ namespace Snake
 
             // Skin hada podle skóre
             Color snakeColor = Color.LimeGreen;
-
             if (score >= 10 && score < 20) snakeColor = Color.CornflowerBlue;
             else if (score >= 20 && score < 30) snakeColor = Color.MediumPurple;
             else if (score >= 30) snakeColor = new Color(rand.Next(255), rand.Next(255), rand.Next(255));
@@ -238,7 +245,7 @@ namespace Snake
                 new Rectangle(apple.X * gridSize, apple.Y * gridSize, gridSize, gridSize),
                 Color.Red);
 
-            // Particles
+            // Particle efekty
             foreach (var p in particles)
             {
                 spriteBatch.Draw(rectTex, new Rectangle((int)p.Position.X, (int)p.Position.Y, 4, 4), Color.Yellow);
