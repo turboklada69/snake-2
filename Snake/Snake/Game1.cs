@@ -14,12 +14,13 @@ namespace Snake
         private Texture2D rectTex;
         private SpriteFont font;
 
-        private int gridSize = 20; // velikost jednoho čtverce
-        private int columns = 30;  // počet sloupců
-        private int rows = 20;     // počet řádků
+        private int gridSize = 20;
+        private int columns = 30;
+        private int rows = 20;
 
         private List<Point> snake = new List<Point>();
         private Point direction = new Point(1, 0);
+
         private Point apple;
 
         private double moveTimer = 0;
@@ -31,12 +32,24 @@ namespace Snake
         private List<Particle> particles = new List<Particle>();
         private List<Point> obstacles = new List<Point>();
 
+        // --- NOVÉ proměnné pro plynulý pohyb ---
+        private Vector2 smoothPosition;    // aktuální pozice hlavy hada (floatová)
+        private Vector2 targetPosition;    // cílová pozice hlavy na gridu (Point převedený na Vector2)
+        private float moveProgress = 1f;   // kolik procent cesty mezi dvěma políčky je ujeto (0-1)
+
+        // --- NOVÉ proměnné pro animovanou hlavu ---
+        private float headOpenTimer = 0f;
+        private bool headOpen = false;
+
+        // --- NOVÉ proměnné pro efekt smrti ---
+        private bool isDead = false;
+        private double deathTimer = 0;
+
         public Game1()
         {
             graphics = new GraphicsDeviceManager(this);
             Content.RootDirectory = "Content";
 
-            // Nastavení okna
             graphics.PreferredBackBufferWidth = columns * gridSize;
             graphics.PreferredBackBufferHeight = rows * gridSize;
             graphics.IsFullScreen = false;
@@ -45,17 +58,20 @@ namespace Snake
 
         protected override void Initialize()
         {
-            // Had uprostřed
             snake.Clear();
             snake.Add(new Point(columns / 2, rows / 2));
 
-            // Okrajové zdi
             GenerateWalls();
-
-            // Náhodné překážky uvnitř mapy
             GenerateObstacles(20);
-
             SpawnApple();
+
+            // Inicializace plynulého pohybu
+            smoothPosition = new Vector2(snake[0].X * gridSize, snake[0].Y * gridSize);
+            targetPosition = smoothPosition;
+            moveProgress = 1f;
+
+            isDead = false;
+            deathTimer = 0;
 
             base.Initialize();
         }
@@ -72,16 +88,50 @@ namespace Snake
 
         protected override void Update(GameTime gameTime)
         {
+            if (isDead)
+            {
+                deathTimer += gameTime.ElapsedGameTime.TotalSeconds;
+                UpdateParticles(gameTime);
+
+                if (deathTimer > 1.0) // 1 sekunda smrti, pak restart
+                {
+                    ResetGame();
+                }
+                return;
+            }
+
             if (Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
             HandleInput();
 
             moveTimer += gameTime.ElapsedGameTime.TotalSeconds;
-            if (moveTimer >= moveInterval)
+
+            // --- plynulý pohyb ---
+            if (moveProgress < 1f)
+            {
+                float speed = 1f / (float)moveInterval;
+                moveProgress += speed * (float)gameTime.ElapsedGameTime.TotalSeconds;
+                if (moveProgress > 1f) moveProgress = 1f;
+
+                // Interpolace mezi starou a novou pozicí
+                smoothPosition = Vector2.Lerp(smoothPosition, targetPosition, moveProgress);
+            }
+            else if (moveTimer >= moveInterval)
             {
                 moveTimer = 0;
                 MoveSnake();
+                moveProgress = 0f;
+                // Nastav nové cílové pozice pro plynulý pohyb
+                targetPosition = new Vector2(snake[0].X * gridSize, snake[0].Y * gridSize);
+            }
+
+            // --- animace hlavy ---
+            headOpenTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
+            if (headOpenTimer >= 0.3f)
+            {
+                headOpen = !headOpen;
+                headOpenTimer = 0f;
             }
 
             UpdateParticles(gameTime);
@@ -110,7 +160,10 @@ namespace Snake
 
             if (obstacles.Contains(newHead) || snake.Contains(newHead))
             {
-                ResetGame();
+                // Zahaj efekt smrti
+                isDead = true;
+                deathTimer = 0;
+                CreateParticles(newHead, 40);
                 return;
             }
 
@@ -119,7 +172,7 @@ namespace Snake
             if (newHead == apple)
             {
                 score++;
-                CreateParticles(apple);
+                CreateParticles(apple, 10);
                 SpawnApple();
             }
             else
@@ -143,14 +196,12 @@ namespace Snake
         {
             obstacles.Clear();
 
-            // Horní a spodní hrany
             for (int x = 0; x < columns; x++)
             {
                 obstacles.Add(new Point(x, 0));
                 obstacles.Add(new Point(x, rows - 1));
             }
 
-            // Levá a pravá hrana
             for (int y = 1; y < rows - 1; y++)
             {
                 obstacles.Add(new Point(0, y));
@@ -183,11 +234,18 @@ namespace Snake
             GenerateWalls();
             GenerateObstacles(20);
             SpawnApple();
+
+            smoothPosition = new Vector2(snake[0].X * gridSize, snake[0].Y * gridSize);
+            targetPosition = smoothPosition;
+            moveProgress = 1f;
+
+            isDead = false;
+            deathTimer = 0;
         }
 
-        private void CreateParticles(Point pos)
+        private void CreateParticles(Point pos, int count)
         {
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < count; i++)
             {
                 particles.Add(new Particle(
                     new Vector2(pos.X * gridSize + gridSize / 2, pos.Y * gridSize + gridSize / 2),
@@ -218,39 +276,90 @@ namespace Snake
 
             spriteBatch.Begin();
 
-            // Skin hada podle skóre
-            Color snakeColor = Color.LimeGreen;
-            if (score >= 10 && score < 20) snakeColor = Color.CornflowerBlue;
-            else if (score >= 20 && score < 30) snakeColor = Color.MediumPurple;
-            else if (score >= 30) snakeColor = new Color(rand.Next(255), rand.Next(255), rand.Next(255));
+            // --- Blikající zdi ---
+            float pulse = (float)(Math.Sin(gameTime.TotalGameTime.TotalSeconds * 3) * 0.2 + 0.8);
+            Color wallColor = new Color(pulse, pulse, pulse);
 
-            // Překážky
+            // Překážky (zdi + kameny)
             foreach (Point o in obstacles)
             {
+                bool isWall = (o.X == 0 || o.X == columns - 1 || o.Y == 0 || o.Y == rows - 1);
+                Color color = isWall ? wallColor : Color.Gray;
+
                 spriteBatch.Draw(rectTex,
                     new Rectangle(o.X * gridSize, o.Y * gridSize, gridSize, gridSize),
-                    Color.Gray);
+                    color);
             }
 
-            // Had
-            foreach (Point s in snake)
+            // --- Had ---
+
+            // Vykreslíme tělo hadu (vše kromě hlavy)
+            for (int i = 1; i < snake.Count; i++)
             {
+                Point s = snake[i];
                 spriteBatch.Draw(rectTex,
                     new Rectangle(s.X * gridSize, s.Y * gridSize, gridSize, gridSize),
-                    snakeColor);
+                    Color.LimeGreen);
             }
 
-            // Jablko
+            // Vykreslení hlavy s animací a očima
+
+            // Pozice hlavy (plynulá)
+            Rectangle headRect = new Rectangle(
+                (int)smoothPosition.X,
+                (int)smoothPosition.Y,
+                gridSize,
+                gridSize);
+
+            // Barva hlavy mění se podle otevření pusy
+            Color headColor = headOpen ? Color.LimeGreen : Color.Green;
+
+            spriteBatch.Draw(rectTex, headRect, headColor);
+
+            // Oči (dle směru)
+            int eyeSize = 4;
+            int eyeOffsetX = 6;
+            int eyeOffsetY = 5;
+
+            Vector2 leftEye = new Vector2();
+            Vector2 rightEye = new Vector2();
+
+            if (direction == new Point(1, 0)) // doprava
+            {
+                leftEye = new Vector2(headRect.X + eyeOffsetX, headRect.Y + eyeOffsetY);
+                rightEye = new Vector2(headRect.X + eyeOffsetX, headRect.Y + eyeOffsetY + eyeSize + 2);
+            }
+            else if (direction == new Point(-1, 0)) // doleva
+            {
+                leftEye = new Vector2(headRect.X + gridSize - eyeOffsetX - eyeSize, headRect.Y + eyeOffsetY);
+                rightEye = new Vector2(headRect.X + gridSize - eyeOffsetX - eyeSize, headRect.Y + eyeOffsetY + eyeSize + 2);
+            }
+            else if (direction == new Point(0, -1)) // nahoru
+            {
+                leftEye = new Vector2(headRect.X + 5, headRect.Y + eyeOffsetY);
+                rightEye = new Vector2(headRect.X + gridSize - 9, headRect.Y + eyeOffsetY);
+            }
+            else if (direction == new Point(0, 1)) // dolů
+            {
+                leftEye = new Vector2(headRect.X + 5, headRect.Y + gridSize - eyeOffsetY - eyeSize);
+                rightEye = new Vector2(headRect.X + gridSize - 9, headRect.Y + gridSize - eyeOffsetY - eyeSize);
+            }
+
+            spriteBatch.Draw(rectTex, new Rectangle((int)leftEye.X, (int)leftEye.Y, eyeSize, eyeSize), Color.Black);
+            spriteBatch.Draw(rectTex, new Rectangle((int)rightEye.X, (int)rightEye.Y, eyeSize, eyeSize), Color.Black);
+
+            // --- Jablko ---
             spriteBatch.Draw(rectTex,
                 new Rectangle(apple.X * gridSize, apple.Y * gridSize, gridSize, gridSize),
                 Color.Red);
 
-            // Particle efekty
+            // --- Particles ---
             foreach (var p in particles)
             {
                 spriteBatch.Draw(rectTex, new Rectangle((int)p.Position.X, (int)p.Position.Y, 4, 4), Color.Yellow);
             }
 
+            // --- Skóre ---
             spriteBatch.DrawString(font, $"Skore: {score}", new Vector2(10, 10), Color.White);
 
             spriteBatch.End();
